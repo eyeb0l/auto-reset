@@ -1,10 +1,17 @@
-import { mkdir, readFile, writeFile, rename, open, unlink } from 'node:fs/promises';
+import { mkdir, readFile, rename, open, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_SETTINGS, validateSettings } from './policy.mjs';
 
+export const ACTIVITY_RETENTION = Object.freeze({ maxEntries: 1000, maxAgeDays: 7 });
+export const ACTIVITY_CLEANUP_INTERVAL_MS = 60 * 60_000;
+
 export class StateStore {
-  constructor(directory) { this.directory = directory; }
+  constructor(directory, { now = Date.now } = {}) {
+    this.directory = directory;
+    this.now = now;
+    this.lastActivityCleanupAt = null;
+  }
 
   async open() {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
@@ -33,12 +40,14 @@ export class StateStore {
     } catch (error) {
       if (error.code !== 'ENOENT') { await this.close(); throw new Error(`Could not read Auto Reset state: ${error.message}`); }
       this.data = { version: 1, settings: { ...DEFAULT_SETTINGS }, attempts: [], activity: [] };
-      await this.save();
     }
+    try { await this.save(); }
+    catch (error) { await this.close(); throw error; }
     return this;
   }
 
   async save() {
+    this.pruneActivity();
     // Keep the journal durable before any reset RPC. Atomic replacement survives interrupted writes.
     const path = join(this.directory, `state-${randomUUID()}.tmp`);
     const file = await open(path, 'wx', 0o600);
@@ -49,9 +58,22 @@ export class StateStore {
     try { await directory.sync(); } finally { await directory.close(); }
   }
 
-  log(message, { level = 'info', accountId = null, now = Date.now() } = {}) {
+  log(message, { level = 'info', accountId = null, now = this.now() } = {}) {
     this.data.activity.unshift({ id: randomUUID(), at: now, message, level, accountId });
-    this.data.activity = this.data.activity.slice(0, 200);
+    this.data.activity = this.data.activity.slice(0, ACTIVITY_RETENTION.maxEntries);
+  }
+
+  pruneActivity() {
+    const now = this.now();
+    const due = this.lastActivityCleanupAt === null || now < this.lastActivityCleanupAt
+      || now - this.lastActivityCleanupAt >= ACTIVITY_CLEANUP_INTERVAL_MS;
+    if (due) {
+      const cutoff = now - ACTIVITY_RETENTION.maxAgeDays * 24 * 60 * 60_000;
+      this.data.activity = this.data.activity.filter((entry) => Number.isFinite(entry?.at) && entry.at >= cutoff);
+      this.lastActivityCleanupAt = now;
+    }
+    this.data.activity = this.data.activity.slice(0, ACTIVITY_RETENTION.maxEntries);
+    // The reset-attempt journal is independent: never discard idempotency keys during log cleanup.
   }
 
   async close() {

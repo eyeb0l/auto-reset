@@ -9,11 +9,42 @@ import { NOW, credit, accountData } from './helpers.mjs';
 
 async function setup(t, session, clock = () => NOW) {
   const directory = await mkdtemp(join(tmpdir(), 'auto-reset-test-'));
-  const store = await new StateStore(directory).open();
+  const store = await new StateStore(directory, { now: clock }).open();
   t.after(async () => { await store.close(); await rm(directory, { recursive: true, force: true }); });
   const monitor = new Monitor(store, { connect: (action) => action(session), now: clock });
   return { directory, store, monitor };
 }
+
+test('every scheduled check is logged even when account and usage have not changed', async (t) => {
+  let now = NOW;
+  const { monitor, store, directory } = await setup(t, {
+    inspect: async () => accountData([]), consume: async () => assert.fail('Unexpected consumption'),
+  }, () => now);
+  for (let index = 0; index < 3; index++) {
+    await monitor.tick();
+    now += 300_000;
+  }
+  const checks = store.data.activity.filter((entry) => entry.message === 'Checked usage and available resets.');
+  assert.equal(checks.length, 3);
+  assert.deepEqual(checks.map((entry) => entry.at), [NOW + 600_000, NOW + 300_000, NOW]);
+  assert.equal(monitor.status().snapshot.checkedAt, checks[0].at);
+  assert.equal(JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')).activity.length, 3);
+});
+
+test('repeated failures are logged for each check and the last successful timestamp stays accurate', async (t) => {
+  let fail = false;
+  let now = NOW;
+  const { monitor, store } = await setup(t, { inspect: async () => {
+    if (fail) throw new Error('Network unavailable');
+    return accountData([]);
+  } }, () => now);
+  await monitor.tick();
+  fail = true;
+  for (let index = 0; index < 2; index++) { now += 300_000; await monitor.tick(); }
+  assert.equal(store.data.activity.filter((entry) => entry.level === 'error').length, 2);
+  assert.equal(monitor.status().connected, false);
+  assert.equal(monitor.status().snapshot.checkedAt, NOW);
+});
 
 test('automatic check consumes only the earliest due credit; read-only refresh and dry-run never spend', async (t) => {
   let current = accountData([credit('later', NOW / 1000 + 1700), credit('first')]);

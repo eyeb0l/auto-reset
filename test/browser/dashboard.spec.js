@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 function sampleStatus() {
   const now = Date.now();
   return { connected: true, error: null, busy: false, nextCheckAt: now + 60000,
-    settings: { enabled: true, leadMinutes: 30, pollSeconds: 60 }, attempts: [],
+    settings: { enabled: true, leadMinutes: 30, pollSeconds: 60 }, attempts: [], activityRetention: { maxEntries: 1000, maxAgeDays: 7 },
     snapshot: { accountId: 'browser-fixture', checkedAt: now, availableCount: 2, detailsAvailable: true,
       windows: [{ key: 'primary', label: '5-hour limit', remainingPercent: 76, resetsAt: now + 8_040_000 },
         { key: 'secondary', label: 'Weekly limit', remainingPercent: 22, resetsAt: now + 280_800_000 }],
@@ -57,7 +57,7 @@ test('dashboard saves automation settings, refreshes and applies a simulated res
   expect(mutations[2].body).toEqual({ creditId: 'first' });
 });
 
-test('desktop matches the full-screen concept structure and has no browser errors', async ({ page }) => {
+test('desktop renders the full dashboard and check timing without browser errors', async ({ page }) => {
   await page.setViewportSize({ width: 1487, height: 1058 });
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -65,9 +65,63 @@ test('desktop matches the full-screen concept structure and has no browser error
   await page.goto('/');
   await expect(page.getByText('Codex connected')).toBeVisible();
   await expect(page.getByRole('heading')).toHaveText(['Make every reset count.', 'Current usage', 'Banked resets', 'Automatic resets', 'Available resets', 'Activity']);
+  await expect(page.locator('.check-status')).toContainText('Last successful check:');
+  await expect(page.locator('.check-status')).toContainText('Next check:');
+  await page.getByText('Uses your local Codex CLI login.').scrollIntoViewIfNeeded();
   await expect(page.getByText('Uses your local Codex CLI login.')).toBeInViewport();
   await page.screenshot({ path: '/tmp/auto-reset-desktop.png', fullPage: true, animations: 'disabled' });
   expect(errors).toEqual([]);
+});
+
+function activityHistory(count) {
+  return Array.from({ length: count }, (_, index) => ({ id: `history-${index}`, at: Date.now() - index * 300_000, message: `Scheduled check ${index}`, level: 'info' }));
+}
+
+test('activity displays 12 entries, expands in batches, and collapses back to 12', async ({ page }) => {
+  const status = sampleStatus();
+  status.activity = activityHistory(30);
+  await mockApi(page, status);
+  await page.goto('/');
+  const rows = page.locator('#activity-entries li');
+  await expect(rows).toHaveCount(12);
+  await expect(page.getByText('Showing 12 of 30 entries')).toBeVisible();
+  await expect(page.getByText('History keeps up to 1,000 entries for 7 days.')).toBeVisible();
+  await page.getByRole('button', { name: 'Show more' }).click();
+  await expect(rows).toHaveCount(24);
+  await page.getByRole('button', { name: 'Show more' }).click();
+  await expect(rows).toHaveCount(30);
+  await expect(page.getByRole('button', { name: 'Show more' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Show less' }).click();
+  await expect(rows).toHaveCount(12);
+});
+
+test('new background checks update timing without collapsing expanded history', async ({ page }) => {
+  const initial = sampleStatus();
+  initial.activity = activityHistory(30);
+  const { state } = await mockApi(page, initial);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Show more' }).click();
+  state.activity.unshift({ id: 'new-background', at: Date.now(), message: 'New background check', level: 'info' });
+  state.snapshot.checkedAt += 300_000;
+  state.nextCheckAt += 300_000;
+  await expect(page.getByText('New background check', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('#activity-entries li')).toHaveCount(24);
+  await expect(page.getByText('Showing 24 of 31 entries')).toBeVisible();
+  await expect(page.locator('.check-status time')).toHaveAttribute('datetime', new Date(state.snapshot.checkedAt).toISOString());
+});
+
+test('mobile activity controls stay within the viewport and remain usable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const status = sampleStatus();
+  status.activity = activityHistory(25);
+  await mockApi(page, status);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Show more' }).click();
+  await expect(page.locator('#activity-entries li')).toHaveCount(24);
+  await page.getByRole('button', { name: 'Show less' }).click();
+  await expect(page.locator('#activity-entries li')).toHaveCount(12);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.locator('.activity').screenshot({ path: '/tmp/auto-reset-activity-mobile.png', animations: 'disabled' });
 });
 
 test('mobile fits the viewport and all settings and reset controls remain usable', async ({ page }) => {

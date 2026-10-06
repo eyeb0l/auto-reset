@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { withCodex } from './codex.mjs';
 import { normalizeSnapshot, availableCredits, dueCredits, validateSettings } from './policy.mjs';
+import { ACTIVITY_RETENTION } from './store.mjs';
 
 const OUTCOME_MESSAGES = {
   reset: 'Reset applied successfully.',
@@ -44,6 +45,7 @@ export class Monitor {
       busy: this.busy,
       nextCheckAt: this.nextCheckAt,
       activity: this.store.data.activity.filter((entry) => !entry.accountId || entry.accountId === accountId),
+      activityRetention: ACTIVITY_RETENTION,
       attempts: this.store.data.attempts.filter((attempt) => attempt.accountId === accountId).map((attempt) => ({
         creditId: attempt.creditId, outcome: attempt.outcome, pending: !attempt.outcome,
         retryAt: attempt.retryAt, error: attempt.error,
@@ -96,7 +98,7 @@ export class Monitor {
 
   recordError(error) {
     const message = error instanceof Error ? error.message : 'Unable to check Codex.';
-    if (this.error !== message) this.store.log(message, { level: 'error', now: this.now(), accountId: this.snapshot?.accountId });
+    this.store.log(message, { level: 'error', now: this.now(), accountId: this.snapshot?.accountId });
     this.error = message;
   }
 
@@ -104,12 +106,8 @@ export class Monitor {
     return this.enqueue(async () => {
       try {
         return await this.connect(async (session) => {
-          const previous = this.snapshot;
-          const wasError = this.error;
           const snapshot = await this.capture(session);
-          if (!previous || previous.accountId !== snapshot.accountId || wasError || !automatic) {
-            this.store.log('Checked usage and available resets.', { accountId: snapshot.accountId, now: this.now() });
-          }
+          this.store.log('Checked usage and available resets.', { accountId: snapshot.accountId, now: this.now() });
           const due = dueCredits(snapshot, this.store.data.settings, this.now());
           if (automatic && !dryRun && this.store.data.settings.enabled && snapshot.accountId) {
             // Resolve uncertain requests first, retaining the exact key across retries/restarts.

@@ -51,6 +51,9 @@ Options: `--host`, `--port`, `--state-dir`, and `--dry-run` for `check`. Environ
 - Saves the attempt to disk **before** calling consume. Timeouts and uncertain results reuse the same key, including after a restart. Attempts are scoped to the account; switching accounts cannot reuse another account's key.
 - Accepts the backend's decision. `nothingToReset` backs off and tries again before expiry; `noCredit` and `alreadyRedeemed` stop retries for that credit. An explicit `nothingToReset` result completes that attempt, so the next eligible attempt gets a new key.
 - Keeps checking after network/login errors. The dashboard marks its previous successful snapshot as stale and disables application until it can make a fresh read. Pausing automation also pauses uncertain automatic retries; manually retrying remains possible.
+- Records every successful check and every failed operation in Activity. The dashboard shows the last successful check and next scheduled check even when the usage values have not changed.
+
+Activity initially displays the newest **12 entries**. **Show more** reveals another 12; **Show less** collapses the list. History is capped at **1,000 entries**, with entries older than **7 days** removed at startup and during an hourly cleanup on subsequent state saves. Reset attempt records and their idempotency keys are retained independently of activity cleanup.
 
 The monitor cannot override Codex eligibility rules or redeem an already expired credit. It needs to be running and able to reach Codex before expiry. Resets are applied only through Codex's own API; this utility never buys credits or changes payment settings. Keep `.auto-reset/state.json` when restarting so pending attempts retain their idempotency keys.
 

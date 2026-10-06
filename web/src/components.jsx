@@ -79,9 +79,17 @@ export function CreditTable({ snapshot, settings, attempts, connected, now, appl
   </section>;
 }
 
-export function Activity({ entries }) {
+const ACTIVITY_PAGE_SIZE = 12;
+
+export function Activity({ entries, checkedAt, nextCheckAt, busy, now, retention }) {
+  const [visibleCount, setVisibleCount] = useState(ACTIVITY_PAGE_SIZE);
+  const shown = Math.min(visibleCount, entries.length);
   return <section className="panel activity" aria-labelledby="activity-title"><h2 id="activity-title">Activity</h2>
+    <div className="check-status"><span>Last successful check: {checkedAt ? <time dateTime={new Date(checkedAt).toISOString()} title={new Date(checkedAt).toLocaleString()}>{dateLabel(checkedAt)}</time> : 'Waiting for first check'}</span><span>{busy ? 'Checking now…' : nextCheckAt ? `Next check: ${duration(nextCheckAt, now)}` : 'Next check: Waiting for schedule'}</span></div>
     <div className="activity-head"><span>Time</span><span>Action</span></div>
-    {entries.length ? <ol className="activity-list">{entries.slice(0, 12).map((entry) => <li key={entry.id}><time dateTime={new Date(entry.at).toISOString()}>{dateLabel(entry.at)}</time><span className={entry.level === 'error' ? 'error-text' : entry.level === 'success' ? 'success-text' : ''}>{entry.message}</span></li>)}</ol> : <p className="empty-text">The next check will appear here.</p>}
+    {entries.length ? <ol className="activity-list" id="activity-entries">{entries.slice(0, shown).map((entry) => <li key={entry.id}><time dateTime={new Date(entry.at).toISOString()}>{dateLabel(entry.at)}</time><span className={entry.level === 'error' ? 'error-text' : entry.level === 'success' ? 'success-text' : ''}>{entry.message}</span></li>)}</ol> : <p className="empty-text">The next check will appear here.</p>}
+    <div className="activity-footer"><div className="activity-summary"><span>Showing {shown} of {entries.length} entries</span>{retention && <span>History keeps up to {retention.maxEntries.toLocaleString()} entries for {retention.maxAgeDays} days.</span>}</div>
+      {entries.length > ACTIVITY_PAGE_SIZE && <div className="activity-actions">{shown > ACTIVITY_PAGE_SIZE && <button className="button small" onClick={() => setVisibleCount(ACTIVITY_PAGE_SIZE)} aria-controls="activity-entries">Show less</button>}{shown < entries.length && <button className="button small" onClick={() => setVisibleCount((count) => Math.min(count + ACTIVITY_PAGE_SIZE, entries.length))} aria-controls="activity-entries">Show more</button>}</div>}
+    </div>
   </section>;
 }

@@ -68,6 +68,6 @@ export default function App() {
       <div className="overview"><UsagePanel snapshot={snapshot} now={now} /><BankedPanel snapshot={snapshot} now={now} /></div>
       <AutomationSettings settings={status?.settings || defaults} onSave={save} busy={saving || !status} />
       <CreditTable snapshot={snapshot} settings={status?.settings || defaults} attempts={status?.attempts || []} connected={status?.connected && !error && !status?.busy} now={now} applying={applying} onApply={apply} />
-      <Activity entries={status?.activity || []} />
+      <Activity key={snapshot?.accountId || 'unknown'} entries={status?.activity || []} checkedAt={snapshot?.checkedAt} nextCheckAt={status?.nextCheckAt} busy={status?.busy} now={now} retention={status?.activityRetention} />
     </main><footer>Uses your local Codex CLI login.</footer></div>;
 }
