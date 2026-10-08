@@ -107,7 +107,6 @@ export class Monitor {
       try {
         return await this.connect(async (session) => {
           const snapshot = await this.capture(session);
-          this.store.log('Checked usage and available resets.', { accountId: snapshot.accountId, now: this.now() });
           const due = dueCredits(snapshot, this.store.data.settings, this.now());
           if (automatic && !dryRun && this.store.data.settings.enabled && snapshot.accountId) {
             // Resolve uncertain requests first, retaining the exact key across retries/restarts.

@@ -69,7 +69,9 @@ export class StateStore {
       || now - this.lastActivityCleanupAt >= ACTIVITY_CLEANUP_INTERVAL_MS;
     if (due) {
       const cutoff = now - ACTIVITY_RETENTION.maxAgeDays * 24 * 60 * 60_000;
-      this.data.activity = this.data.activity.filter((entry) => Number.isFinite(entry?.at) && entry.at >= cutoff);
+      // Migrate old check rows too: successful checks now live only in the snapshot timestamp.
+      this.data.activity = this.data.activity.filter((entry) => Number.isFinite(entry?.at)
+        && entry.at >= cutoff && entry.message !== 'Checked usage and available resets.');
       this.lastActivityCleanupAt = now;
     }
     this.data.activity = this.data.activity.slice(0, ACTIVITY_RETENTION.maxEntries);

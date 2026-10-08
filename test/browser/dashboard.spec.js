@@ -9,7 +9,7 @@ function sampleStatus() {
         { key: 'secondary', label: 'Weekly limit', remainingPercent: 22, resetsAt: now + 280_800_000 }],
       credits: [{ id: 'first', title: 'Weekly usage reset', resetType: 'codexRateLimits', status: 'available', expiresAt: now + 64_800_000 },
         { id: 'second', title: 'Weekly usage reset', resetType: 'codexRateLimits', status: 'available', expiresAt: now + 518_400_000 }] },
-    activity: [{ id: 'activity-1', at: now, message: 'Checked usage and available resets.', level: 'info' },
+    activity: [{ id: 'activity-1', at: now, message: 'Reset applied successfully.', level: 'success' },
       { id: 'activity-2', at: now - 60000, message: 'Automatic resets enabled.', level: 'info' }],
   };
 }
@@ -74,7 +74,7 @@ test('desktop renders the full dashboard and check timing without browser errors
 });
 
 function activityHistory(count) {
-  return Array.from({ length: count }, (_, index) => ({ id: `history-${index}`, at: Date.now() - index * 300_000, message: `Scheduled check ${index}`, level: 'info' }));
+  return Array.from({ length: count }, (_, index) => ({ id: `history-${index}`, at: Date.now() - index * 300_000, message: `Settings changed ${index}`, level: 'info' }));
 }
 
 test('activity displays 12 entries, expands in batches, and collapses back to 12', async ({ page }) => {
@@ -101,13 +101,22 @@ test('new background checks update timing without collapsing expanded history', 
   const { state } = await mockApi(page, initial);
   await page.goto('/');
   await page.getByRole('button', { name: 'Show more' }).click();
-  state.activity.unshift({ id: 'new-background', at: Date.now(), message: 'New background check', level: 'info' });
   state.snapshot.checkedAt += 300_000;
   state.nextCheckAt += 300_000;
-  await expect(page.getByText('New background check', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.check-status time')).toHaveAttribute('datetime', new Date(state.snapshot.checkedAt).toISOString(), { timeout: 10_000 });
   await expect(page.locator('#activity-entries li')).toHaveCount(24);
-  await expect(page.getByText('Showing 24 of 31 entries')).toBeVisible();
-  await expect(page.locator('.check-status time')).toHaveAttribute('datetime', new Date(state.snapshot.checkedAt).toISOString());
+  await expect(page.getByText('Showing 24 of 30 entries')).toBeVisible();
+  await expect(page.locator('#activity-entries li').first()).toContainText('Settings changed 0');
+});
+
+test('empty activity still shows the latest check and explains which events appear', async ({ page }) => {
+  const status = sampleStatus();
+  status.activity = [];
+  await mockApi(page, status);
+  await page.goto('/');
+  await expect(page.locator('.check-status time')).toHaveAttribute('datetime', new Date(status.snapshot.checkedAt).toISOString());
+  await expect(page.getByText('No activity yet. Settings changes, reset actions, and errors will appear here.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Show more' })).toHaveCount(0);
 });
 
 test('mobile activity controls stay within the viewport and remain usable', async ({ page }) => {

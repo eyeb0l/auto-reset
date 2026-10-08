@@ -48,6 +48,25 @@ test('history stays bounded at the newest 1000 events in memory and on disk', as
   assert.deepEqual(saved.attempts, attempts);
 });
 
+test('startup removes legacy check rows but retains other events and reset keys', async (t) => {
+  const path = await directory(t);
+  const activity = [
+    { id: 'routine', at: NOW, message: 'Checked usage and available resets.', level: 'info', accountId: 'account-a' },
+    { id: 'other-account', at: NOW, message: 'Checked usage and available resets.', level: 'info', accountId: 'account-b' },
+    { id: 'settings', at: NOW, message: 'Automatic resets paused.', level: 'info' },
+    { id: 'reset', at: NOW, message: 'Reset applied successfully.', level: 'success' },
+    { id: 'error', at: NOW, message: 'Network unavailable', level: 'error' },
+  ];
+  await writeFile(join(path, 'state.json'), JSON.stringify({ version: 1, settings: DEFAULT_SETTINGS, attempts, activity }));
+  const store = await new StateStore(path, { now: () => NOW }).open();
+  t.after(() => store.close());
+  const saved = JSON.parse(await readFile(join(path, 'state.json'), 'utf8'));
+  assert.deepEqual(store.data.activity, activity.slice(2));
+  assert.deepEqual(saved.activity, activity.slice(2));
+  assert.deepEqual(saved.attempts, attempts);
+  assert.deepEqual(saved.settings, DEFAULT_SETTINGS);
+});
+
 test('age cleanup runs again after an hour even without new log entries', async (t) => {
   const path = await directory(t);
   let now = NOW;

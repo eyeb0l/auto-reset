@@ -17,13 +17,14 @@ npm start
 
 Open **http://127.0.0.1:4780**. Automatic application is enabled by default: check every **60 seconds**, apply a reset when it has **30 minutes or less** left. Change or pause this in the dashboard and click **Save settings**.
 
-To bind directly to your Tailscale address:
+To serve HTTPS on your tailnet, keep the app listening on `127.0.0.1:4780` and add a persistent Tailscale Serve proxy:
 
 ```sh
-npm start -- --host "$(tailscale ip -4)"
+tailscale serve --bg --https=4780 http://127.0.0.1:4780
+tailscale serve status
 ```
 
-Then open `http://<tailnet-ip>:4780` from your tailnet. The app has no authentication layer, as requested. Binding to the tailnet IP makes it accessible on that interface. Leave the process running for automatic application; the browser can be closed.
+Open the HTTPS URL printed by Tailscale, such as `https://squiggle.spaniel-delta.ts.net:4780`. Both the HTTPS listener and the local backend use port **4780**. The app has no authentication layer, as requested; access is controlled by your tailnet. Leave the app running for automatic application; the browser can be closed. This command adds the port’s mapping without replacing other Serve mappings.
 
 For development, run `npm start` and `npm run dev` in separate terminals. Vite proxies `/api` to port 4780.
 
@@ -51,15 +52,15 @@ Options: `--host`, `--port`, `--state-dir`, and `--dry-run` for `check`. Environ
 - Saves the attempt to disk **before** calling consume. Timeouts and uncertain results reuse the same key, including after a restart. Attempts are scoped to the account; switching accounts cannot reuse another account's key.
 - Accepts the backend's decision. `nothingToReset` backs off and tries again before expiry; `noCredit` and `alreadyRedeemed` stop retries for that credit. An explicit `nothingToReset` result completes that attempt, so the next eligible attempt gets a new key.
 - Keeps checking after network/login errors. The dashboard marks its previous successful snapshot as stale and disables application until it can make a fresh read. Pausing automation also pauses uncertain automatic retries; manually retrying remains possible.
-- Records every successful check and every failed operation in Activity. The dashboard shows the last successful check and next scheduled check even when the usage values have not changed.
+- Shows the last successful check and next scheduled check separately from Activity, even when the usage values have not changed. Successful checks do not add log entries; Activity records settings changes, reset actions, and errors.
 
-Activity initially displays the newest **12 entries**. **Show more** reveals another 12; **Show less** collapses the list. History is capped at **1,000 entries**, with entries older than **7 days** removed at startup and during an hourly cleanup on subsequent state saves. Reset attempt records and their idempotency keys are retained independently of activity cleanup.
+Activity initially displays the newest **12 entries**. **Show more** reveals another 12; **Show less** collapses the list. History is capped at **1,000 entries**, with entries older than **7 days** removed at startup and during an hourly cleanup on subsequent state saves. Existing routine check rows are removed on startup. Reset attempt records and their idempotency keys are retained independently of activity cleanup.
 
 The monitor cannot override Codex eligibility rules or redeem an already expired credit. It needs to be running and able to reach Codex before expiry. Resets are applied only through Codex's own API; this utility never buys credits or changes payment settings. Keep `.auto-reset/state.json` when restarting so pending attempts retain their idempotency keys.
 
 ## Keep it running on Linux
 
-An example user service is in [docs/auto-reset.service](docs/auto-reset.service). Edit its paths, Node executable, and optional tailnet bind address for your installation, then install it as `~/.config/systemd/user/auto-reset.service`:
+An example user service is in [docs/auto-reset.service](docs/auto-reset.service). Edit its paths and Node executable for your installation; keep the default loopback bind for Tailscale Serve, then install it as `~/.config/systemd/user/auto-reset.service`:
 
 ```sh
 systemctl --user daemon-reload

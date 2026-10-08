@@ -7,8 +7,8 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=%h/auto-reset
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/env node %h/auto-reset/src/cli.mjs serve
-# To listen on your tailnet, append: --host 100.x.y.z
+ExecStart=/usr/bin/env node %h/auto-reset/src/cli.mjs serve --host 127.0.0.1 --port 4780
+# Add tailnet HTTPS separately: tailscale serve --bg --https=4780 http://127.0.0.1:4780
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=120

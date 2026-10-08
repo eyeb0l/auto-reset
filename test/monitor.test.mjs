@@ -15,7 +15,7 @@ async function setup(t, session, clock = () => NOW) {
   return { directory, store, monitor };
 }
 
-test('every scheduled check is logged even when account and usage have not changed', async (t) => {
+test('scheduled checks update the latest timestamp without adding activity', async (t) => {
   let now = NOW;
   const { monitor, store, directory } = await setup(t, {
     inspect: async () => accountData([]), consume: async () => assert.fail('Unexpected consumption'),
@@ -24,11 +24,21 @@ test('every scheduled check is logged even when account and usage have not chang
     await monitor.tick();
     now += 300_000;
   }
-  const checks = store.data.activity.filter((entry) => entry.message === 'Checked usage and available resets.');
-  assert.equal(checks.length, 3);
-  assert.deepEqual(checks.map((entry) => entry.at), [NOW + 600_000, NOW + 300_000, NOW]);
-  assert.equal(monitor.status().snapshot.checkedAt, checks[0].at);
-  assert.equal(JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')).activity.length, 3);
+  assert.deepEqual(store.data.activity, []);
+  assert.equal(monitor.status().snapshot.checkedAt, NOW + 600_000);
+  assert.deepEqual(JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')).activity, []);
+});
+
+test('manual refresh updates the timestamp and preserves other activity without adding a check row', async (t) => {
+  let now = NOW;
+  const { monitor, store } = await setup(t, { inspect: async () => accountData([]) }, () => now);
+  await monitor.setSettings({ enabled: false, leadMinutes: 30, pollSeconds: 300 });
+  const activity = structuredClone(store.data.activity);
+  await monitor.refresh();
+  now += 300_000;
+  await monitor.refresh();
+  assert.equal(monitor.status().snapshot.checkedAt, now);
+  assert.deepEqual(monitor.status().activity, activity);
 });
 
 test('repeated failures are logged for each check and the last successful timestamp stays accurate', async (t) => {
@@ -42,6 +52,7 @@ test('repeated failures are logged for each check and the last successful timest
   fail = true;
   for (let index = 0; index < 2; index++) { now += 300_000; await monitor.tick(); }
   assert.equal(store.data.activity.filter((entry) => entry.level === 'error').length, 2);
+  assert.equal(store.data.activity.length, 2);
   assert.equal(monitor.status().connected, false);
   assert.equal(monitor.status().snapshot.checkedAt, NOW);
 });
