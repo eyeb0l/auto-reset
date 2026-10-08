@@ -53,7 +53,12 @@ h2 { margin: 0; font-size: 18px; line-height: 24px; font-weight: 680; letter-spa
 .automation-description { margin: 6px 0 12px; font-size: 14px; line-height: 20px; }
 .settings-fields { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 22px; align-items: end; }
 .settings-fields label { display: flex; flex-direction: column; gap: 6px; color: #637087; font-size: 12px; line-height: 18px; }
-select { height: 38px; background: white; color: #172033; border: 1px solid #d8dfe9; border-radius: 6px; padding: 0 12px; width: 100%; }
+select, input[type="number"] { height: 38px; background: white; color: #172033; border: 1px solid #d8dfe9; border-radius: 6px; padding: 0 12px; width: 100%; min-width: 0; }
+input:disabled { opacity: .55; }
+input[type="number"]:focus-visible, input[type="checkbox"]:focus-visible { outline: 3px solid #80cfac; outline-offset: 3px; }
+.settings-fields .low-usage-option { flex-direction: row; align-items: center; flex-wrap: wrap; min-height: 38px; }
+.low-usage-option span:first-child { width: 100%; }
+.low-usage-option input { accent-color: var(--green); margin: 0; }
 .settings-fields .button { justify-self: end; min-height: 38px; padding: 9px 22px; }
 .resets { margin-bottom: 12px; padding: 18px 20px 14px; }
 .resets h2 { margin-bottom: 10px; }

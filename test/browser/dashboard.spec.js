@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 function sampleStatus() {
   const now = Date.now();
   return { connected: true, error: null, busy: false, nextCheckAt: now + 60000,
-    settings: { enabled: true, leadMinutes: 30, pollSeconds: 60 }, attempts: [], activityRetention: { maxEntries: 1000, maxAgeDays: 7 },
+    settings: { enabled: true, leadMinutes: 30, pollSeconds: 60, lowUsageEnabled: false, weeklyRemainingThreshold: 1, minRedemptionMinutes: 60 }, attempts: [], activityRetention: { maxEntries: 1000, maxAgeDays: 7 },
     snapshot: { accountId: 'browser-fixture', checkedAt: now, availableCount: 2, detailsAvailable: true,
       windows: [{ key: 'primary', label: '5-hour limit', remainingPercent: 76, resetsAt: now + 8_040_000 },
         { key: 'secondary', label: 'Weekly limit', remainingPercent: 22, resetsAt: now + 280_800_000 }],
@@ -53,7 +53,7 @@ test('dashboard saves automation settings, refreshes and applies a simulated res
   await expect(page.getByRole('status')).toContainText('Reset applied');
   await expect(page.getByRole('progressbar', { name: 'Weekly limit remaining' })).toHaveAttribute('aria-valuenow', '100');
   expect(mutations.map((mutation) => mutation.endpoint)).toEqual(['/api/settings', '/api/refresh', '/api/apply']);
-  expect(mutations[0].body).toEqual({ enabled: false, leadMinutes: 15, pollSeconds: 60 });
+  expect(mutations[0].body).toEqual({ enabled: false, leadMinutes: 15, pollSeconds: 60, lowUsageEnabled: false, weeklyRemainingThreshold: 1, minRedemptionMinutes: 60 });
   expect(mutations[2].body).toEqual({ creditId: 'first' });
 });
 
@@ -180,4 +180,59 @@ test('Codex errors show stale-data explanation and prevent applying old reset da
   await expect(page.getByRole('alert')).toContainText('Sign in to Codex first');
   await expect(page.getByRole('alert')).toContainText('Showing the last successful check');
   await expect(page.getByRole('button', { name: /^Apply Weekly usage reset/ }).first()).toBeDisabled();
+});
+
+test('low-usage threshold and redemption cooldown save independently of polling', async ({ page }) => {
+  const { state, mutations } = await mockApi(page);
+  await page.goto('/');
+  const threshold = page.getByLabel('Weekly usage remaining threshold (%)');
+  await expect(threshold).toHaveValue('1');
+  await expect(threshold).toBeDisabled();
+  await page.getByLabel('Low weekly usage trigger', { exact: true }).check();
+  await expect(threshold).toBeEnabled();
+  await threshold.fill('0.5');
+  await page.getByLabel('Minimum between automatic redemptions (minutes)').fill('15');
+  await page.getByRole('button', { name: 'Save settings' }).click();
+  await expect(page.getByRole('status')).toContainText('Settings saved');
+  expect(mutations[0].body).toEqual({ enabled: true, leadMinutes: 30, pollSeconds: 60,
+    lowUsageEnabled: true, weeklyRemainingThreshold: 0.5, minRedemptionMinutes: 15 });
+  state.snapshot.checkedAt += 60000;
+  await expect(page.locator('.check-status time')).toHaveAttribute('datetime', new Date(state.snapshot.checkedAt).toISOString(), { timeout: 10000 });
+  await expect(threshold).toHaveValue('0.5');
+  await expect(page.getByLabel('Minimum between automatic redemptions (minutes)')).toHaveValue('15');
+  await expect(page.getByLabel('Check interval')).toHaveValue('60');
+});
+
+test('mobile low-usage settings remain visible and usable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockApi(page);
+  await page.goto('/');
+  await page.getByLabel('Low weekly usage trigger', { exact: true }).check();
+  await page.getByLabel('Weekly usage remaining threshold (%)').fill('2');
+  await page.getByLabel('Minimum between automatic redemptions (minutes)').fill('30');
+  await page.getByRole('button', { name: 'Save settings' }).click();
+  await expect(page.getByRole('status')).toContainText('Settings saved');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.locator('.automation').screenshot({ path: '/tmp/auto-reset-automation-mobile.png' });
+});
+
+test('waiting for outcome shows the safeguard and disables new manual redemptions', async ({ page }) => {
+  const status = sampleStatus();
+  status.redemptionSafety = { waitingForOutcome: true, waitingForAllowance: true, externalRedemption: false,
+    reason: 'Waiting for fresh account data to confirm the previous reset outcome.', cooldownUntil: null };
+  await mockApi(page, status);
+  await page.goto('/');
+  await expect(page.getByRole('status')).toContainText('confirm the previous reset outcome');
+  for (const button of await page.getByRole('button', { name: /^Apply Weekly usage reset/ }).all()) await expect(button).toBeDisabled();
+});
+
+test('cooldown blocks automation while leaving explicit manual controls available', async ({ page }) => {
+  const status = sampleStatus();
+  status.redemptionSafety = { waitingForOutcome: false, waitingForAllowance: false, externalRedemption: false,
+    reason: 'Automatic redemptions are waiting for the cooldown.', cooldownUntil: Date.now() + 3600000 };
+  await mockApi(page, status);
+  await page.goto('/');
+  await expect(page.getByRole('status')).toContainText('cooldown');
+  await expect(page.getByRole('status')).toContainText('Automatic cooldown ends');
+  await expect(page.getByRole('button', { name: /^Apply Weekly usage reset/ }).first()).toBeEnabled();
 });

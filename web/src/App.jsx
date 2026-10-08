@@ -2,10 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { request } from './api.js';
 import { Header, RefreshIcon, UsagePanel, BankedPanel, AutomationSettings, CreditTable, Activity } from './components.jsx';
 
-const defaults = { enabled: true, leadMinutes: 30, pollSeconds: 60 };
+const defaults = { enabled: true, leadMinutes: 30, pollSeconds: 60,
+  lowUsageEnabled: false, weeklyRemainingThreshold: 1, minRedemptionMinutes: 60 };
 const outcomes = {
-  reset: 'Reset applied. Your usage limits are refreshed.',
-  nothingToReset: 'Codex has nothing eligible to reset yet. The monitor will try again before expiry.',
+  reset: 'Reset applied. Fresh account data will verify the allowance refresh.',
+  nothingToReset: 'Codex has nothing eligible to reset yet. The monitor will retry after the backoff and automatic cooldown.',
   noCredit: 'Codex reports that this reset is no longer available.',
   alreadyRedeemed: 'This reset has already been applied.',
 };
@@ -67,7 +68,8 @@ export default function App() {
       {notice && <div className="message notice-message" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss notification">×</button></div>}
       <div className="overview"><UsagePanel snapshot={snapshot} now={now} /><BankedPanel snapshot={snapshot} now={now} /></div>
       <AutomationSettings settings={status?.settings || defaults} onSave={save} busy={saving || !status} />
-      <CreditTable snapshot={snapshot} settings={status?.settings || defaults} attempts={status?.attempts || []} connected={status?.connected && !error && !status?.busy} now={now} applying={applying} onApply={apply} />
+      {status?.redemptionSafety?.reason && <p className="pending-note" role="status">{status.redemptionSafety.reason}{status.redemptionSafety.cooldownUntil > now && <span>Automatic cooldown ends {new Date(status.redemptionSafety.cooldownUntil).toLocaleString()}.</span>}</p>}
+      <CreditTable snapshot={snapshot} settings={status?.settings || defaults} attempts={status?.attempts || []} safety={status?.redemptionSafety} connected={status?.connected && !error && !status?.busy} now={now} applying={applying} onApply={apply} />
       <Activity key={snapshot?.accountId || 'unknown'} entries={status?.activity || []} checkedAt={snapshot?.checkedAt} nextCheckAt={status?.nextCheckAt} busy={status?.busy} now={now} retention={status?.activityRetention} />
     </main><footer>Uses your local Codex CLI login.</footer></div>;
 }

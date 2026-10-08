@@ -31,17 +31,22 @@ export function BankedPanel({ snapshot, now }) {
 
 export function AutomationSettings({ settings, onSave, busy }) {
   const [draft, setDraft] = useState(settings);
-  useEffect(() => { setDraft(settings); }, [settings.enabled, settings.leadMinutes, settings.pollSeconds]);
+  useEffect(() => { setDraft(settings); }, [settings.enabled, settings.leadMinutes, settings.pollSeconds,
+    settings.lowUsageEnabled, settings.weeklyRemainingThreshold, settings.minRedemptionMinutes]);
   const changed = JSON.stringify(settings) !== JSON.stringify(draft);
   const leadOptions = [...new Set([5, 15, 30, 60, 360, 1440, draft.leadMinutes])].sort((a, b) => a - b);
   const intervalOptions = [...new Set([15, 30, 60, 120, 300, draft.pollSeconds])].sort((a, b) => a - b);
   return <form className="panel automation" onSubmit={(event) => { event.preventDefault(); onSave(draft); }}>
     <div className="section-heading"><h2>Automatic resets</h2><label className="toggle-label"><span>{draft.enabled ? 'Enabled' : 'Paused'}</span><input type="checkbox" role="switch" aria-label="Automatic resets" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} disabled={busy} /><span className="toggle" /></label></div>
-    <p className="muted automation-description">Apply the oldest reset before it expires.</p>
+    <p className="muted automation-description">Apply a reset before expiry or, optionally, when weekly usage runs low.</p>
     <div className="settings-fields"><label>Apply before expiry<select value={draft.leadMinutes} onChange={(event) => setDraft({ ...draft, leadMinutes: Number(event.target.value) })} disabled={busy}>{leadOptions.map((value) => <option value={value} key={value}>{value < 60 ? `${value} minutes` : `${value / 60} hour${value === 60 ? '' : 's'}`}</option>)}</select></label>
       <label>Check interval<select value={draft.pollSeconds} onChange={(event) => setDraft({ ...draft, pollSeconds: Number(event.target.value) })} disabled={busy}>{intervalOptions.map((value) => <option value={value} key={value}>{value} seconds</option>)}</select></label>
+      <label>Minimum between automatic redemptions (minutes)<input type="number" min="1" max="10080" step="1" required value={draft.minRedemptionMinutes} onChange={(event) => setDraft({ ...draft, minRedemptionMinutes: Number(event.target.value) })} disabled={busy} /></label>
+      <label className="low-usage-option"><span>Low weekly usage trigger</span><input type="checkbox" aria-label="Low weekly usage trigger" checked={draft.lowUsageEnabled} onChange={(event) => setDraft({ ...draft, lowUsageEnabled: event.target.checked })} disabled={busy} /><span>{draft.lowUsageEnabled ? 'Enabled' : 'Disabled'}</span></label>
+      <label>Weekly usage remaining threshold (%)<input type="number" min="0" max="100" step="any" required value={draft.weeklyRemainingThreshold} onChange={(event) => setDraft({ ...draft, weeklyRemainingThreshold: Number(event.target.value) })} disabled={busy || !draft.lowUsageEnabled} /></label>
       <button type="submit" className="button primary" disabled={!changed || busy}>{busy ? 'Saving…' : 'Save settings'}</button>
     </div>
+    <p className="caption">The minimum applies to both automatic triggers and can delay an expiring reset. After redemption, fresh account data must confirm the outcome and allowance refresh. Low weekly usage must rise above the threshold to rearm automatic redemption.</p>
   </form>;
 }
 
@@ -58,7 +63,7 @@ function creditState(credit, settings, now, attempt) {
   return { label: credit.expiresAt - now <= settings.leadMinutes * 60_000 ? 'Due soon' : 'Scheduled', tone: 'green' };
 }
 
-export function CreditTable({ snapshot, settings, attempts, connected, now, applying, onApply }) {
+export function CreditTable({ snapshot, settings, attempts, safety, connected, now, applying, onApply }) {
   const credits = snapshot?.credits || [];
   const latest = (id) => attempts.findLast((attempt) => attempt.creditId === id);
   const pending = attempts.find((attempt) => attempt.pending);
@@ -66,13 +71,13 @@ export function CreditTable({ snapshot, settings, attempts, connected, now, appl
   return <section className="panel resets" aria-labelledby="resets-title"><h2 id="resets-title">Available resets</h2>
     {snapshot && !snapshot.detailsAvailable && <p className="detail-note">Codex returned {snapshot.availableCount ?? 'an unknown number of'} resets without expiry details. Automatic application waits for those details.</p>}
     {snapshot?.detailsAvailable && snapshot.availableCount > credits.length && <p className="detail-note">Showing {credits.length} of {snapshot.availableCount} available resets. Codex may limit the detail list.</p>}
-    {missingPending && <div className="pending-note"><span>A reset has an uncertain result. Retry the saved attempt to resolve it safely.</span><button className="button small" disabled={!connected || Boolean(applying)} onClick={() => onApply(pending.creditId)}>Retry pending reset</button></div>}
+    {missingPending && <div className="pending-note"><span>A reset has an uncertain result. Retry the saved attempt to resolve it safely.</span><button className="button small" disabled={!connected || Boolean(applying) || safety?.externalRedemption} onClick={() => onApply(pending.creditId)}>Retry pending reset</button></div>}
     <div className="table-scroll"><table className="credit-table"><thead><tr><th>Reset</th><th>Expires</th><th>Status</th><th>Action</th></tr></thead><tbody>
       {credits.map((credit, index) => {
         const state = creditState(credit, settings, now, latest(credit.id));
         const canApply = latest(credit.id)?.pending || (credit.status === 'available' && credit.resetType === 'codexRateLimits'
           && (!credit.expiresAt || credit.expiresAt > now) && !['reset', 'alreadyRedeemed', 'noCredit'].includes(latest(credit.id)?.outcome));
-        return <tr key={credit.id}><td><span title={credit.description || undefined}>{credit.title}</span></td><td>{credit.expiresAt ? dateLabel(credit.expiresAt) : 'No expiry'}{credit.expiresAt && <span className="caption table-caption">{credit.expiresAt <= now ? 'Expired' : duration(credit.expiresAt, now)}</span>}</td><td><span className={`reset-status ${state.tone}`}><span className="dot" />{state.label}</span></td><td><button className={`button small ${index === 0 ? 'primary' : 'outline-green'}`} onClick={() => onApply(credit.id)} disabled={!connected || Boolean(applying) || !canApply || (pending && pending.creditId !== credit.id)} aria-label={`${latest(credit.id)?.pending ? 'Retry' : 'Apply'} ${credit.title}, ${credit.expiresAt ? dateLabel(credit.expiresAt) : 'no expiry'}`}>{applying === credit.id ? 'Applying…' : latest(credit.id)?.pending ? 'Retry' : 'Apply now'}</button></td></tr>;
+        return <tr key={credit.id}><td><span title={credit.description || undefined}>{credit.title}</span></td><td>{credit.expiresAt ? dateLabel(credit.expiresAt) : 'No expiry'}{credit.expiresAt && <span className="caption table-caption">{credit.expiresAt <= now ? 'Expired' : duration(credit.expiresAt, now)}</span>}</td><td><span className={`reset-status ${state.tone}`}><span className="dot" />{state.label}</span></td><td><button className={`button small ${index === 0 ? 'primary' : 'outline-green'}`} onClick={() => onApply(credit.id)} disabled={!connected || Boolean(applying) || !canApply || safety?.externalRedemption || (safety?.waitingForOutcome && !latest(credit.id)?.pending) || (pending && pending.creditId !== credit.id)} aria-label={`${latest(credit.id)?.pending ? 'Retry' : 'Apply'} ${credit.title}, ${credit.expiresAt ? dateLabel(credit.expiresAt) : 'no expiry'}`}>{applying === credit.id ? 'Applying…' : latest(credit.id)?.pending ? 'Retry' : 'Apply now'}</button></td></tr>;
       })}
       {!credits.length && <tr><td colSpan="4" className="table-empty">{!snapshot ? 'Waiting for available resets…' : snapshot.availableCount === 0 ? 'All caught up. No banked resets are available right now.' : snapshot.detailsAvailable ? 'No reset details were returned. The monitor will keep checking.' : 'Reset details are not available yet.'}</td></tr>}
     </tbody></table></div>

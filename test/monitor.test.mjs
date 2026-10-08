@@ -78,6 +78,7 @@ test('automatic check consumes only the earliest due credit; read-only refresh a
 test('uncertain consume is journaled before the request and retries the same key after a process restart', async (t) => {
   const keys = [];
   let first = true;
+  let now = NOW;
   let current = accountData();
   let directory;
   const session = { inspect: async () => current, consume: async (id, key) => {
@@ -88,13 +89,14 @@ test('uncertain consume is journaled before the request and retries the same key
     if (first) { first = false; throw new Error('Response lost after backend accepted request'); }
     current = accountData([]); return { outcome: 'reset' };
   } };
-  const setupResult = await setup(t, session);
+  const setupResult = await setup(t, session, () => now);
   directory = setupResult.directory;
   await assert.rejects(setupResult.monitor.refresh({ automatic: true }), /Response lost/);
   await setupResult.store.close();
-  const reopened = await new StateStore(directory).open();
+  const reopened = await new StateStore(directory, { now: () => now }).open();
   t.after(() => reopened.close());
-  const monitor = new Monitor(reopened, { connect: (action) => action(session), now: () => NOW });
+  const monitor = new Monitor(reopened, { connect: (action) => action(session), now: () => now });
+  now += 60_000;
   await monitor.refresh({ automatic: true });
   assert.equal(keys.length, 2);
   assert.equal(keys[0], keys[1]);
@@ -122,7 +124,8 @@ test('explicit nothingToReset refusal backs off and starts a new logical attempt
   let now = NOW;
   const keys = [];
   const session = { inspect: async () => accountData(), consume: async (id, key) => { keys.push(key); return { outcome: 'nothingToReset' }; } };
-  const { monitor } = await setup(t, session, () => now);
+  const { monitor, store } = await setup(t, session, () => now);
+  await monitor.setSettings({ ...store.data.settings, minRedemptionMinutes: 1 });
   await monitor.refresh({ automatic: true });
   await monitor.refresh({ automatic: true });
   assert.equal(keys.length, 1);
